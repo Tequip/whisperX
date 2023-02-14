@@ -111,6 +111,7 @@ class DecodingResult:
     no_speech_prob: float = np.nan
     temperature: float = np.nan
     compression_ratio: float = np.nan
+    word_probs: List[float] = None
 
 
 class Inference:
@@ -586,6 +587,8 @@ class DecodingTask:
         n_batch = tokens.shape[0]
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
+        tokens_probs = []
+
 
         try:
             for i in range(self.sample_len):
@@ -601,16 +604,17 @@ class DecodingTask:
                 # apply the logit filters, e.g. for suppressing or applying penalty to
                 for logit_filter in self.logit_filters:
                     logit_filter.apply(logits, tokens)
-
                 # expand the tokens tensor with the selected next tokens
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
+
+                tokens_probs.append(torch.max(logits.softmax(dim=-1), 1).values.numpy())
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
         finally:
             self.inference.cleanup_caching()
 
-        return tokens, sum_logprobs, no_speech_probs
+        return tokens, sum_logprobs, no_speech_probs, np.array(tokens_probs).T
 
     @torch.no_grad()
     def run(self, mel: Tensor) -> List[DecodingResult]:
@@ -634,11 +638,11 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
-
+        tokens, sum_logprobs, no_speech_probs, tokens_probs = self._main_loop(audio_features, tokens)
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
         audio_features = audio_features[:: self.n_group]
         no_speech_probs = no_speech_probs[:: self.n_group]
+
         assert audio_features.shape[0] == len(no_speech_probs) == n_audio
 
         tokens = tokens.reshape(n_audio, self.n_group, -1)
@@ -646,6 +650,7 @@ class DecodingTask:
 
         # get the final candidates for each group, and slice between the first sampled token and EOT
         tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
+
         tokens: List[List[Tensor]] = [
             [t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s] for s in tokens
         ]
@@ -653,12 +658,46 @@ class DecodingTask:
         # select the top-ranked sample in each group
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
+        # we can either pick the smallest probability (word that the most difficult,
+        # or follow the same approach with just picking the whole row of probs
+        PICK_LOWEST = True
+        if PICK_LOWEST:
+            tokens_probs = np.min(tokens_probs, axis = 0)
+        else:
+            tokens_probs = tokens_probs[selected][0]
+
+        # decode tokens for later use
+        decoded_tokens = [tokenizer.decode(t).strip() for t in tokens[0]]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
 
-        fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
+        word_probabilities: List[List[float]] = [[]]
+        word_pointer = 0
+        token_pointer = 0
+        # transform tokens probability to word probability
+        while word_pointer < len(texts[0].split()):
+
+            current_word = texts[0].split()[word_pointer]
+            token_word = ''
+            token_prob = 1
+            while token_word != current_word:
+                if tokens[0][token_pointer] == '':
+                    token_pointer += 1
+                    continue
+
+                token_word += decoded_tokens[token_pointer]
+                token_prob *= tokens_probs[token_pointer]
+                token_pointer += 1
+
+                if token_pointer >= len(tokens[0]):
+                    break
+
+            word_probabilities[0].append(token_prob)
+            word_pointer += 1
+
+        fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs, word_probabilities)
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
 
@@ -672,8 +711,9 @@ class DecodingTask:
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
+                word_probs=word_probs
             )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
+            for text, language, tokens, features, avg_logprob, no_speech_prob, word_probs in zip(*fields)
         ]
 
 
@@ -703,7 +743,7 @@ def decode(model: "Whisper", mel: Tensor, options: DecodingOptions = DecodingOpt
         mel = mel.unsqueeze(0)
 
     result = DecodingTask(model, options).run(mel)
-    
+
     if single:
         result = result[0]
 

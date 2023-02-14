@@ -11,7 +11,8 @@ from .alignment import load_align_model, align, get_trellis, backtrack, merge_re
 from .decoding import DecodingOptions, DecodingResult
 from .diarize import assign_word_speakers, Segment
 from .tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
-from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, interpolate_nans, write_txt, write_vtt, write_srt, write_ass, write_tsv
+from .utils import exact_div, format_timestamp, optional_int, optional_float, str2bool, interpolate_nans, write_txt, \
+    write_vtt, write_srt, write_ass, write_tsv
 from .vad import Binarize
 import pandas as pd
 
@@ -19,19 +20,18 @@ if TYPE_CHECKING:
     from .model import Whisper
 
 
-
 def transcribe(
-    model: "Whisper",
-    audio: Union[str, np.ndarray, torch.Tensor],
-    *,
-    verbose: Optional[bool] = None,
-    temperature: Union[float, Tuple[float, ...]] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-    compression_ratio_threshold: Optional[float] = 2.4,
-    logprob_threshold: Optional[float] = -1.0,
-    no_speech_threshold: Optional[float] = 0.6,
-    condition_on_previous_text: bool = False, # turn off by default due to errors it causes
-    mel: np.ndarray = None,
-    **decode_options,
+        model: "Whisper",
+        audio: Union[str, np.ndarray, torch.Tensor],
+        *,
+        verbose: Optional[bool] = None,
+        temperature: Union[float, Tuple[float, ...]] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        compression_ratio_threshold: Optional[float] = 2.4,
+        logprob_threshold: Optional[float] = -1.0,
+        no_speech_threshold: Optional[float] = 0.6,
+        condition_on_previous_text: bool = False,  # turn off by default due to errors it causes
+        mel: np.ndarray = None,
+        **decode_options,
 ):
     """
     Transcribe an audio file using Whisper
@@ -89,6 +89,8 @@ def transcribe(
     if mel is None:
         mel = log_mel_spectrogram(audio)
 
+    print(mel.shape)
+
     if decode_options.get("language", None) is None:
         if not model.is_multilingual:
             decode_options["language"] = "en"
@@ -118,7 +120,6 @@ def transcribe(
             else:
                 # disable best_of when t == 0
                 kwargs.pop("best_of", None)
-
             options = DecodingOptions(**kwargs, temperature=t)
             decode_result = model.decode(segment, options)
 
@@ -138,7 +139,7 @@ def transcribe(
         N_FRAMES, model.dims.n_audio_ctx
     )  # mel frames per output token: 2
     time_precision = (
-        input_stride * HOP_LENGTH / SAMPLE_RATE
+            input_stride * HOP_LENGTH / SAMPLE_RATE
     )  # time per output token: 0.02 (seconds)
     all_tokens = []
     all_segments = []
@@ -150,7 +151,7 @@ def transcribe(
         all_tokens.extend(initial_prompt)
 
     def add_segment(
-        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
+            *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
     ):
         text = tokenizer.decode([token for token in text_tokens if token < tokenizer.eot])
         if len(text.strip()) == 0:  # skip empty text output
@@ -180,6 +181,7 @@ def transcribe(
     with tqdm.tqdm(total=num_frames, unit='frames', disable=verbose is not False) as pbar:
         while seek < num_frames:
             timestamp_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
+            print(timestamp_offset)
             segment = pad_or_trim(mel[:, seek:], N_FRAMES).to(model.device).to(dtype)
             segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
 
@@ -205,10 +207,10 @@ def transcribe(
                 for current_slice in consecutive:
                     sliced_tokens = tokens[last_slice:current_slice]
                     start_timestamp_position = (
-                        sliced_tokens[0].item() - tokenizer.timestamp_begin
+                            sliced_tokens[0].item() - tokenizer.timestamp_begin
                     )
                     end_timestamp_position = (
-                        sliced_tokens[-1].item() - tokenizer.timestamp_begin
+                            sliced_tokens[-1].item() - tokenizer.timestamp_begin
                     )
 
                     # clamp end-time to at least be 1 frame after start-time
@@ -222,7 +224,7 @@ def transcribe(
                     )
                     last_slice = current_slice
                 last_timestamp_position = (
-                    tokens[last_slice - 1].item() - tokenizer.timestamp_begin
+                        tokens[last_slice - 1].item() - tokenizer.timestamp_begin
                 )
                 seek += last_timestamp_position * input_stride
                 all_tokens.extend(tokens[: last_slice + 1].tolist())
@@ -276,7 +278,7 @@ def merge_chunks(segments, chunk_size=CHUNK_LENGTH):
         segments_list.append(Segment(speech_turn.start, speech_turn.end, "UNKNOWN"))
 
     for sdx, seg in enumerate(segments_list):
-        if seg.end - curr_start > chunk_size and curr_end-curr_start > 0:
+        if seg.end - curr_start > chunk_size and curr_end - curr_start > 0:
             merged_segments.append({
                 "start": curr_start,
                 "end": curr_end,
@@ -289,21 +291,21 @@ def merge_chunks(segments, chunk_size=CHUNK_LENGTH):
         seg_idxs.append((seg.start, seg.end))
         speaker_idxs.append(seg.speaker)
     # add final
-    merged_segments.append({ 
-                "start": curr_start,
-                "end": curr_end,
-                "segments": seg_idxs,
-            })    
+    merged_segments.append({
+        "start": curr_start,
+        "end": curr_end,
+        "segments": seg_idxs,
+    })
     return merged_segments
 
 
 def transcribe_with_vad(
-    model: "Whisper",
-    audio: Union[str, np.ndarray, torch.Tensor],
-    vad_pipeline,
-    mel = None,
-    verbose: Optional[bool] = None,
-    **kwargs
+        model: "Whisper",
+        audio: Union[str, np.ndarray, torch.Tensor],
+        vad_pipeline,
+        mel=None,
+        verbose: Optional[bool] = None,
+        **kwargs
 ):
     """
     Transcribe per VAD segment
@@ -311,7 +313,7 @@ def transcribe_with_vad(
 
     if mel is None:
         mel = log_mel_spectrogram(audio)
-    
+
     prev = 0
     output = {"segments": []}
 
@@ -321,12 +323,14 @@ def transcribe_with_vad(
 
     for sdx, seg_t in enumerate(vad_segments):
         if verbose:
-            print(f"~~ Transcribing VAD chunk: ({format_timestamp(seg_t['start'])} --> {format_timestamp(seg_t['end'])}) ~~")
-        seg_f_start, seg_f_end = int(seg_t["start"] * SAMPLE_RATE / HOP_LENGTH), int(seg_t["end"] * SAMPLE_RATE / HOP_LENGTH)
+            print(
+                f"~~ Transcribing VAD chunk: ({format_timestamp(seg_t['start'])} --> {format_timestamp(seg_t['end'])}) ~~")
+        seg_f_start, seg_f_end = int(seg_t["start"] * SAMPLE_RATE / HOP_LENGTH), int(
+            seg_t["end"] * SAMPLE_RATE / HOP_LENGTH)
         local_f_start, local_f_end = seg_f_start - prev, seg_f_end - prev
-        mel = mel[:, local_f_start:] # seek forward
+        mel = mel[:, local_f_start:]  # seek forward
         prev = seg_f_start
-        local_mel = mel[:, :local_f_end-local_f_start]
+        local_mel = mel[:, :local_f_end - local_f_start]
         result = transcribe(model, audio, mel=local_mel, verbose=verbose, **kwargs)
         seg_t["text"] = result["text"]
         output["segments"].append(
@@ -338,8 +342,8 @@ def transcribe_with_vad(
                 "seg-text": [x["text"] for x in result["segments"]],
                 "seg-start": [x["start"] for x in result["segments"]],
                 "seg-end": [x["end"] for x in result["segments"]],
-                }
-            )
+            }
+        )
 
     output["language"] = output["segments"][0]["language"]
 
@@ -347,13 +351,13 @@ def transcribe_with_vad(
 
 
 def transcribe_with_vad_parallel(
-    model: "Whisper",
-    audio: Union[str, np.ndarray, torch.Tensor],
-    vad_pipeline,
-    mel = None,
-    verbose: Optional[bool] = None,
-    batch_size = -1,
-    **kwargs
+        model: "Whisper",
+        audio: Union[str, np.ndarray, torch.Tensor],
+        vad_pipeline,
+        mel=None,
+        verbose: Optional[bool] = None,
+        batch_size=-1,
+        **kwargs
 ):
     """
     Transcribe per VAD segment
@@ -361,7 +365,7 @@ def transcribe_with_vad_parallel(
 
     if mel is None:
         mel = log_mel_spectrogram(audio)
-    
+
     output = {"segments": []}
 
     vad_segments = vad_pipeline(audio)
@@ -384,9 +388,9 @@ def transcribe_with_vad_parallel(
         start_ts = round(start_ts / (HOP_LENGTH / SAMPLE_RATE))
         end_ts = round(end_ts / (HOP_LENGTH / SAMPLE_RATE))
         chunk = mel[:, start_ts:end_ts]
-        chunk = torch.nn.functional.pad(chunk, (0, max_length-chunk.shape[-1]))
+        chunk = torch.nn.functional.pad(chunk, (0, max_length - chunk.shape[-1]))
         chunks.append(chunk)
-    
+
     mel_chunk = torch.stack(chunks, dim=0).to(model.device)
     # using 'decode_options1': only support single temperature decoding (no fallbacks)
     # result_list2 = model.decode(mel_chunk, decode_options1)
@@ -398,7 +402,7 @@ def transcribe_with_vad_parallel(
     no_speech_threshold = kwargs.pop("no_speech_threshold", None)
     condition_on_previous_text = kwargs.pop("condition_on_previous_text", None)
     initial_prompt = kwargs.pop("initial_prompt", None)
-    
+
     t = 0  # TODO: does not upport temperature sweeping
     if t > 0:
         # disable beam_size and patience when t > 0
@@ -413,7 +417,7 @@ def transcribe_with_vad_parallel(
     decode_result = []
     for mel_chunk_batch in mel_chunk_batches:
         decode_result.extend(model.decode(mel_chunk_batch, options))
-    
+
     ##############################
     ### END of parallelization ###
     ##############################
@@ -426,8 +430,8 @@ def transcribe_with_vad_parallel(
     task = kwargs["task"]
     tokenizer = get_tokenizer(model.is_multilingual, language=language, task=task)
     result_segments = post_process_results(
-        decode_result, 
-        duration_list, 
+        decode_result,
+        duration_list,
         offset_list,
         input_stride,
         language,
@@ -435,7 +439,7 @@ def transcribe_with_vad_parallel(
         no_speech_threshold=no_speech_threshold,
         logprob_threshold=logprob_threshold,
         verbose=verbose)
-    
+
     # post processing: collect outputs
     assert len(result_segments) == len(vad_segments)
     for sdx, (seg_t, result) in enumerate(zip(vad_segments, result_segments)):
@@ -449,36 +453,35 @@ def transcribe_with_vad_parallel(
                 "seg-text": [x["text"] for x in result["segments"]],
                 "seg-start": [x["start"] for x in result["segments"]],
                 "seg-end": [x["end"] for x in result["segments"]],
-                }
-            )
-    
+            }
+        )
+
     output["language"] = output["segments"][0]["language"]
 
     return output
 
 
 def post_process_results(
-    result_list, 
-    duration_list, 
-    offset_list,
-    input_stride,
-    language,
-    tokenizer,
-    no_speech_threshold = None,
-    logprob_threshold = None,
-    verbose: Optional[bool] = None,
-    ):
-
+        result_list,
+        duration_list,
+        offset_list,
+        input_stride,
+        language,
+        tokenizer,
+        no_speech_threshold=None,
+        logprob_threshold=None,
+        verbose: Optional[bool] = None,
+):
     seek = 0
     time_precision = (
-        input_stride * HOP_LENGTH / SAMPLE_RATE
+            input_stride * HOP_LENGTH / SAMPLE_RATE
     )  # time per output token: 0.02 (seconds)
     all_tokens = []
     all_segments = []
     outputs = []
 
     def add_segment(
-        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
+            *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
     ):
         text = tokenizer.decode([token for token in text_tokens if token < tokenizer.eot])
         if len(text.strip()) == 0:  # skip empty text output
@@ -520,19 +523,19 @@ def post_process_results(
             if should_skip:
                 seek += segment_shape  # fast-forward to the next segment boundary
                 continue
-        
+
         timestamp_tokens: torch.Tensor = tokens.ge(tokenizer.timestamp_begin)
         consecutive = torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1)
-        
+
         if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
             last_slice = 0
             for current_slice in consecutive:
                 sliced_tokens = tokens[last_slice:current_slice]
                 start_timestamp_position = (
-                    sliced_tokens[0].item() - tokenizer.timestamp_begin
+                        sliced_tokens[0].item() - tokenizer.timestamp_begin
                 )
                 end_timestamp_position = (
-                    sliced_tokens[-1].item() - tokenizer.timestamp_begin
+                        sliced_tokens[-1].item() - tokenizer.timestamp_begin
                 )
                 add_segment(
                     start=timestamp_offset + start_timestamp_position * time_precision,
@@ -542,7 +545,7 @@ def post_process_results(
                 )
                 last_slice = current_slice
             last_timestamp_position = (
-                tokens[last_slice - 1].item() - tokenizer.timestamp_begin
+                    tokens[last_slice - 1].item() - tokenizer.timestamp_begin
             )
             seek += last_timestamp_position * input_stride
             all_tokens.extend(tokens[: last_slice + 1].tolist())
@@ -576,47 +579,74 @@ def cli():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
     parser.add_argument("--model", default="small", choices=available_models(), help="name of the Whisper model to use")
-    parser.add_argument("--model_dir", type=str, default=None, help="the path to save model files; uses ~/.cache/whisper by default")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="device to use for PyTorch inference")
+    parser.add_argument("--model_dir", type=str, default=None,
+                        help="the path to save model files; uses ~/.cache/whisper by default")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
+                        help="device to use for PyTorch inference")
     # alignment params
     parser.add_argument("--align_model", default=None, help="Name of phoneme-level ASR model to do alignment")
-    parser.add_argument("--align_extend", default=2, type=float, help="Seconds before and after to extend the whisper segments for alignment")
-    parser.add_argument("--align_from_prev", default=True, type=bool, help="Whether to clip the alignment start time of current segment to the end time of the last aligned word of the previous segment")
-    parser.add_argument("--interpolate_method", default="nearest", choices=["nearest", "linear", "ignore"], help="For word .srt, method to assign timestamps to non-aligned words, or merge them into neighbouring.")
+    parser.add_argument("--align_extend", default=2, type=float,
+                        help="Seconds before and after to extend the whisper segments for alignment")
+    parser.add_argument("--align_from_prev", default=True, type=bool,
+                        help="Whether to clip the alignment start time of current segment to the end time of the last aligned word of the previous segment")
+    parser.add_argument("--interpolate_method", default="nearest", choices=["nearest", "linear", "ignore"],
+                        help="For word .srt, method to assign timestamps to non-aligned words, or merge them into neighbouring.")
     # vad params
-    parser.add_argument("--vad_filter", action="store_true", help="Whether to first perform VAD filtering to target only transcribe within VAD. Produces more accurate alignment + timestamp, requires more GPU memory & compute.")
+    parser.add_argument("--vad_filter", action="store_true",
+                        help="Whether to first perform VAD filtering to target only transcribe within VAD. Produces more accurate alignment + timestamp, requires more GPU memory & compute.")
     parser.add_argument("--parallel_bs", default=-1, type=int, help="Enable parallel transcribing if > 1")
     # diarization params
-    parser.add_argument("--diarize", action="store_true", help="Apply diarization to assign speaker labels to each segment/word")
+    parser.add_argument("--diarize", action="store_true",
+                        help="Apply diarization to assign speaker labels to each segment/word")
     parser.add_argument("--min_speakers", default=None, type=int)
     parser.add_argument("--max_speakers", default=None, type=int)
     # output save params
     parser.add_argument("--output_dir", "-o", type=str, default=".", help="directory to save the outputs")
-    parser.add_argument("--output_type", default="all", choices=["all", "srt", "srt-word", "vtt", "txt", "tsv", "ass", "ass-char", "pickle", "vad"], help="File type for desired output save")
+    parser.add_argument("--output_type", default="all",
+                        choices=["all", "srt", "srt-word", "vtt", "txt", "tsv", "ass", "ass-char", "pickle", "vad"],
+                        help="File type for desired output save")
 
-    parser.add_argument("--verbose", type=str2bool, default=True, help="whether to print out the progress and debug messages")
+    parser.add_argument("--verbose", type=str2bool, default=True,
+                        help="whether to print out the progress and debug messages")
 
-    parser.add_argument("--task", type=str, default="transcribe", choices=["transcribe", "translate"], help="whether to perform X->X speech recognition ('transcribe') or X->English translation ('translate')")
-    parser.add_argument("--language", type=str, default=None, choices=sorted(LANGUAGES.keys()) + sorted([k.title() for k in TO_LANGUAGE_CODE.keys()]), help="language spoken in the audio, specify None to perform language detection")
+    parser.add_argument("--task", type=str, default="transcribe", choices=["transcribe", "translate"],
+                        help="whether to perform X->X speech recognition ('transcribe') or X->English translation ('translate')")
+    parser.add_argument("--language", type=str, default=None,
+                        choices=sorted(LANGUAGES.keys()) + sorted([k.title() for k in TO_LANGUAGE_CODE.keys()]),
+                        help="language spoken in the audio, specify None to perform language detection")
 
     parser.add_argument("--temperature", type=float, default=0, help="temperature to use for sampling")
-    parser.add_argument("--best_of", type=optional_int, default=5, help="number of candidates when sampling with non-zero temperature")
-    parser.add_argument("--beam_size", type=optional_int, default=5, help="number of beams in beam search, only applicable when temperature is zero")
-    parser.add_argument("--patience", type=float, default=None, help="optional patience value to use in beam decoding, as in https://arxiv.org/abs/2204.05424, the default (1.0) is equivalent to conventional beam search")
-    parser.add_argument("--length_penalty", type=float, default=None, help="optional token length penalty coefficient (alpha) as in https://arxiv.org/abs/1609.08144, uses simple length normalization by default")
+    parser.add_argument("--best_of", type=optional_int, default=5,
+                        help="number of candidates when sampling with non-zero temperature")
+    parser.add_argument("--beam_size", type=optional_int, default=5,
+                        help="number of beams in beam search, only applicable when temperature is zero")
+    parser.add_argument("--patience", type=float, default=None,
+                        help="optional patience value to use in beam decoding, as in https://arxiv.org/abs/2204.05424, the default (1.0) is equivalent to conventional beam search")
+    parser.add_argument("--length_penalty", type=float, default=None,
+                        help="optional token length penalty coefficient (alpha) as in https://arxiv.org/abs/1609.08144, uses simple length normalization by default")
 
-    parser.add_argument("--suppress_tokens", type=str, default="-1", help="comma-separated list of token ids to suppress during sampling; '-1' will suppress most special characters except common punctuations")
-    parser.add_argument("--initial_prompt", type=str, default=None, help="optional text to provide as a prompt for the first window.")
-    parser.add_argument("--condition_on_previous_text", type=str2bool, default=False, help="if True, provide the previous output of the model as a prompt for the next window; disabling may make the text inconsistent across windows, but the model becomes less prone to getting stuck in a failure loop")
-    parser.add_argument("--fp16", type=str2bool, default=True, help="whether to perform inference in fp16; True by default")
+    parser.add_argument("--suppress_tokens", type=str, default="-1",
+                        help="comma-separated list of token ids to suppress during sampling; '-1' will suppress most special characters except common punctuations")
+    parser.add_argument("--initial_prompt", type=str, default=None,
+                        help="optional text to provide as a prompt for the first window.")
+    parser.add_argument("--condition_on_previous_text", type=str2bool, default=False,
+                        help="if True, provide the previous output of the model as a prompt for the next window; disabling may make the text inconsistent across windows, but the model becomes less prone to getting stuck in a failure loop")
+    parser.add_argument("--fp16", type=str2bool, default=True,
+                        help="whether to perform inference in fp16; True by default")
 
-    parser.add_argument("--temperature_increment_on_fallback", type=optional_float, default=0.2, help="temperature to increase when falling back when the decoding fails to meet either of the thresholds below")
-    parser.add_argument("--compression_ratio_threshold", type=optional_float, default=2.4, help="if the gzip compression ratio is higher than this value, treat the decoding as failed")
-    parser.add_argument("--logprob_threshold", type=optional_float, default=-1.0, help="if the average log probability is lower than this value, treat the decoding as failed")
-    parser.add_argument("--no_speech_threshold", type=optional_float, default=0.6, help="if the probability of the <|nospeech|> token is higher than this value AND the decoding has failed due to `logprob_threshold`, consider the segment as silence")
-    parser.add_argument("--threads", type=optional_int, default=0, help="number of threads used by torch for CPU inference; supercedes MKL_NUM_THREADS/OMP_NUM_THREADS")
-    parser.add_argument("--hf_token", type=str, default=None, help="Hugging Face Access Token to access PyAnnote gated models")
-    
+    parser.add_argument("--temperature_increment_on_fallback", type=optional_float, default=0.2,
+                        help="temperature to increase when falling back when the decoding fails to meet either of the thresholds below")
+    parser.add_argument("--compression_ratio_threshold", type=optional_float, default=2.4,
+                        help="if the gzip compression ratio is higher than this value, treat the decoding as failed")
+    parser.add_argument("--logprob_threshold", type=optional_float, default=-1.0,
+                        help="if the average log probability is lower than this value, treat the decoding as failed")
+    parser.add_argument("--no_speech_threshold", type=optional_float, default=0.6,
+                        help="if the probability of the <|nospeech|> token is higher than this value AND the decoding has failed due to `logprob_threshold`, consider the segment as silence")
+    parser.add_argument("--threads", type=optional_int, default=0,
+                        help="number of threads used by torch for CPU inference; supercedes MKL_NUM_THREADS/OMP_NUM_THREADS")
+    parser.add_argument("--hf_token", type=str, default=None,
+                        help="Hugging Face Access Token to access PyAnnote gated models")
+
     args = parser.parse_args().__dict__
     model_name: str = args.pop("model")
     model_dir: str = args.pop("model_dir")
@@ -628,7 +658,7 @@ def cli():
     align_extend: float = args.pop("align_extend")
     align_from_prev: bool = args.pop("align_from_prev")
     interpolate_method: bool = args.pop("interpolate_method")
-    
+
     hf_token: str = args.pop("hf_token")
     vad_filter: bool = args.pop("vad_filter")
     parallel_bs: int = args.pop("parallel_bs")
@@ -640,25 +670,28 @@ def cli():
     vad_pipeline = None
     if vad_filter:
         if hf_token is None:
-            print("Warning, no huggingface token used, needs to be saved in environment variable, otherwise will throw error loading VAD model...")
+            print(
+                "Warning, no huggingface token used, needs to be saved in environment variable, otherwise will throw error loading VAD model...")
         from pyannote.audio import Inference
         vad_pipeline = Inference("pyannote/segmentation",
-                            pre_aggregation_hook=lambda segmentation: segmentation,
-                            use_auth_token=hf_token)
+                                 pre_aggregation_hook=lambda segmentation: segmentation,
+                                 use_auth_token=hf_token)
 
     diarize_pipeline = None
     if diarize:
         if hf_token is None:
-            print("Warning, no --hf_token used, needs to be saved in environment variable, otherwise will throw error loading diarization model...")
+            print(
+                "Warning, no --hf_token used, needs to be saved in environment variable, otherwise will throw error loading diarization model...")
         from pyannote.audio import Pipeline
         diarize_pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization@2.1",
-                                    use_auth_token=hf_token)
+                                                    use_auth_token=hf_token)
 
     os.makedirs(output_dir, exist_ok=True)
 
     if model_name.endswith(".en") and args["language"] not in {"en", "English"}:
         if args["language"] is not None:
-            warnings.warn(f'{model_name} is an English-only model but receipted "{args["language"]}"; using English instead.')
+            warnings.warn(
+                f'{model_name} is an English-only model but receipted "{args["language"]}"; using English instead.')
         args["language"] = "en"
 
     temperature = args.pop("temperature")
@@ -675,14 +708,16 @@ def cli():
     from . import load_model
     model = load_model(model_name, device=device, download_root=model_dir)
 
-    align_language = args["language"] if args["language"] is not None else "en" # default to loading english if not specified
+    align_language = args["language"] if args[
+                                             "language"] is not None else "en"  # default to loading english if not specified
     align_model, align_metadata = load_align_model(align_language, device, model_name=align_model)
 
     for audio_path in args.pop("audio"):
         if vad_filter:
             if parallel_bs > 1:
                 print("Performing VAD and parallel transcribing ...")
-                result = transcribe_with_vad_parallel(model, audio_path, vad_pipeline, temperature=temperature, batch_size=parallel_bs, **args)
+                result = transcribe_with_vad_parallel(model, audio_path, vad_pipeline, temperature=temperature,
+                                                      batch_size=parallel_bs, **args)
             else:
                 print("Performing VAD...")
                 result = transcribe_with_vad(model, audio_path, vad_pipeline, temperature=temperature, **args)
@@ -692,13 +727,14 @@ def cli():
 
         if result["language"] != align_metadata["language"]:
             # load new language
-            print(f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language...")
+            print(
+                f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language...")
             align_model, align_metadata = load_align_model(result["language"], device)
-
 
         print("Performing alignment...")
         result_aligned = align(result["segments"], align_model, align_metadata, audio_path, device,
-                                extend_duration=align_extend, start_from_previous=align_from_prev, interpolate_method=interpolate_method)
+                               extend_duration=align_extend, start_from_previous=align_from_prev,
+                               interpolate_method=interpolate_method)
         audio_basename = os.path.basename(audio_path)
 
         if diarize:
@@ -708,7 +744,8 @@ def cli():
             diarize_df['start'] = diarize_df[0].apply(lambda x: x.start)
             diarize_df['end'] = diarize_df[0].apply(lambda x: x.end)
             # assumes each utterance is single speaker (needs fix)
-            result_segments, word_segments = assign_word_speakers(diarize_df, result_aligned["segments"], fill_nearest=True)
+            result_segments, word_segments = assign_word_speakers(diarize_df, result_aligned["segments"],
+                                                                  fill_nearest=True)
             result_aligned["segments"] = result_segments
             result_aligned["word_segments"] = word_segments
 
@@ -742,7 +779,7 @@ def cli():
         if output_type in ["ass", "all"]:
             with open(os.path.join(output_dir, audio_basename + ".ass"), "w", encoding="utf-8") as ass:
                 write_ass(result_aligned["segments"], file=ass)
-        
+
         # # save ASS character-level
         if output_type in ["ass-char"]:
             with open(os.path.join(output_dir, audio_basename + ".char.ass"), "w", encoding="utf-8") as ass:
@@ -756,7 +793,9 @@ def cli():
         # save word tsv
         if output_type in ["vad"]:
             exp_fp = os.path.join(output_dir, audio_basename + ".sad")
-            wrd_segs = pd.concat([x["word-segments"] for x in result_aligned["segments"]])[['start','end']]
+            wrd_segs = pd.concat([x["word-segments"] for x in result_aligned["segments"]])[['start', 'end']]
             wrd_segs.to_csv(exp_fp, sep='\t', header=None, index=False)
+
+
 if __name__ == "__main__":
     cli()
