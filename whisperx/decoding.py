@@ -607,7 +607,7 @@ class DecodingTask:
                 # expand the tokens tensor with the selected next tokens
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
-                tokens_probs.append(torch.max(logits.softmax(dim=-1), 1).values.numpy())
+                tokens_probs.append(torch.max(logits.softmax(dim=-1), 1).values.cpu().numpy())
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
