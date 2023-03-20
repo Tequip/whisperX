@@ -1,9 +1,9 @@
-numpy
-torch
-torchaudio
-tqdm
-soundfile
-more-itertools
-transformers>=4.19.0
+numpy==1.23.5
+torch==1.13.1
+torchaudio==0.13.1
+tqdm==4.65.0
+soundfile==0.10.3.post1
+more-itertools==9.1.0
+transformers==4.27.1
 ffmpeg-python==0.2.0
-pyannote.audio
+pyannote.audio==2.1.1
